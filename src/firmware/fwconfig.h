@@ -99,6 +99,13 @@
 // Target speed in km/h when walk mode is engaged
 #define WALK_MODE_SPEED_KPH						4
 
+// Number of consecutive PAS level up/down cycles needed to toggle sport mode
+// when assist mode select is configured for PAS sequence.
+#define SPORT_MODE_TOGGLE_PAS_CYCLES			5
+
+// Maximum time between PAS level changes for them to count as one sequence.
+#define SPORT_MODE_TOGGLE_PAS_INTERVAL_MS		1500
+
 
 #define THROTTLE_RESPONSE_LINEAR				1
 #define THROTTLE_RESPONSE_QUADRATIC				2

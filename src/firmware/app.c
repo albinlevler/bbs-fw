@@ -59,6 +59,10 @@ static uint16_t pretension_cutoff_speed_rpm_x10;
 
 static bool lights_state = false;
 
+// counts consecutive alternating PAS level changes, odd count means awaiting decrease
+static uint8_t sport_toggle_pas_steps;
+static uint16_t sport_toggle_last_pas_change_ms;
+
 void apply_pas_cadence(uint8_t* target_current, uint8_t throttle_percent);
 #if HAS_TORQUE_SENSOR
 void apply_pas_torque(uint8_t* target_current);
@@ -77,6 +81,8 @@ void apply_current_ramp_down(uint8_t* target_current, bool enable);
 
 bool check_power_block();
 void block_power_for(uint16_t ms);
+
+void detect_sport_mode_toggle_sequence(uint8_t previous_level, uint8_t new_level);
 
 void reload_assist_params();
 
@@ -114,6 +120,9 @@ void app_init()
 
 	cruise_paused = true;
 	operation_mode = OPERATION_MODE_DEFAULT;
+
+	sport_toggle_pas_steps = 0;
+	sport_toggle_last_pas_change_ms = 0;
 
 	app_set_wheel_max_speed_rpm(convert_wheel_speed_kph_to_rpm(g_config.max_speed_kph));
 	app_set_assist_level(g_config.assist_startup_level);
@@ -214,6 +223,8 @@ void app_set_assist_level(uint8_t level)
 			// sensor from incorrectly applying power if returning to a PAS level.
 			block_power_for(1000);
 		}
+
+		detect_sport_mode_toggle_sequence(assist_level, level);
 
 		assist_level = level;
 		eventlog_write_data(EVT_DATA_ASSIST_LEVEL, assist_level);
@@ -933,6 +944,46 @@ bool check_power_block()
 void block_power_for(uint16_t ms)
 {
 	power_blocked_until_ms = system_ms() + ms;
+}
+
+void detect_sport_mode_toggle_sequence(uint8_t previous_level, uint8_t new_level)
+{
+	if (g_config.assist_mode_select != ASSIST_MODE_SELECT_PAS_SEQUENCE)
+	{
+		return;
+	}
+
+	uint16_t now_ms = (uint16_t)system_ms();
+	bool sequence_timed_out = (uint16_t)(now_ms - sport_toggle_last_pas_change_ms) > SPORT_MODE_TOGGLE_PAS_INTERVAL_MS;
+	sport_toggle_last_pas_change_ms = now_ms;
+
+	if (previous_level == ASSIST_PUSH || new_level == ASSIST_PUSH)
+	{
+		sport_toggle_pas_steps = 0;
+		return;
+	}
+
+	if (sequence_timed_out)
+	{
+		sport_toggle_pas_steps = 0;
+	}
+
+	bool awaiting_decrease = sport_toggle_pas_steps & 1;
+	bool increased = new_level > previous_level;
+
+	if (increased == awaiting_decrease)
+	{
+		// sequence broken, an increase starts a new one
+		sport_toggle_pas_steps = increased ? 1 : 0;
+		return;
+	}
+
+	if (++sport_toggle_pas_steps >= SPORT_MODE_TOGGLE_PAS_CYCLES * 2)
+	{
+		sport_toggle_pas_steps = 0;
+		app_set_operation_mode(operation_mode == OPERATION_MODE_SPORT ?
+			OPERATION_MODE_DEFAULT : OPERATION_MODE_SPORT);
+	}
 }
 
 void reload_assist_params()
